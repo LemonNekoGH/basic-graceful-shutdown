@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -11,36 +12,38 @@ import (
 )
 
 func main() {
-	signalChan := make(chan os.Signal, 8)
 	// graceful shutdown
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
-	defer close(signalChan)
+	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
 	fmt.Println("start!")
 	g := errgroup.Group{}
-	signalReceived := false
 
 	// a gorutine do process
 	g.Go(func() error {
 		fmt.Println("start")
 		times := 0
-		for !signalReceived {
-			fmt.Printf("process start %d\n", times+1)
-			for i := 0; i < 10; i++ {
-				time.Sleep(time.Second)
-				fmt.Printf("small process done %d\n", i+1)
+		for {
+			select {
+			// if receive done signal, cancel
+			case <-ctx.Done():
+				fmt.Println("end")
+				return nil
+			// if not receive, continue do process
+			default:
+				fmt.Printf("process start %d\n", times+1)
+				for i := 0; i < 10; i++ {
+					time.Sleep(time.Second)
+					fmt.Printf("child process done %d\n", i+1)
+				}
+				fmt.Printf("process done %d\n", times+1)
+				times++
 			}
-			fmt.Printf("process done %d\n", times+1)
-			times++
 		}
-		fmt.Println("end")
-		return nil
 	})
 	// a gorutine receive signal
 	g.Go(func() error {
-		sig := <-signalChan
-		signalReceived = true
-		fmt.Printf("signal received %d, waiting for process done.\n", sig)
+		<-ctx.Done()
+		fmt.Printf("stop signal received, waiting for process done.\n")
 		return fmt.Errorf("times gorutine stopped")
 	})
 
