@@ -5,10 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 )
 
 func main() {
@@ -16,10 +15,10 @@ func main() {
 	ctx, _ := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 
 	fmt.Println("start!")
-	g := errgroup.Group{}
-
+	g := sync.WaitGroup{}
+	g.Add(2)
 	// a gorutine do process
-	g.Go(func() error {
+	go func() {
 		fmt.Println("start")
 		times := 0
 		for {
@@ -27,7 +26,8 @@ func main() {
 			// if receive done signal, cancel
 			case <-ctx.Done():
 				fmt.Println("end")
-				return nil
+				g.Done()
+				return
 			// if not receive, continue do process
 			default:
 				fmt.Printf("process start %d\n", times+1)
@@ -39,14 +39,25 @@ func main() {
 				times++
 			}
 		}
-	})
+	}()
 	// a gorutine receive signal
-	g.Go(func() error {
+	go func() {
 		<-ctx.Done()
 		fmt.Printf("stop signal received, waiting for process done.\n")
-		return fmt.Errorf("times gorutine stopped")
-	})
+		// should not wait after
+		g.Done()
+		ctx2, _ := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		for {
+			select {
+			case <-ctx2.Done():
+				fmt.Printf("stop signal received again, force shutting down.\n")
+				os.Exit(1)
+			default:
+				time.Sleep(time.Millisecond * 500)
+			}
+		}
+	}()
 
-	_ = g.Wait()
+	g.Wait()
 	fmt.Println("end!")
 }
